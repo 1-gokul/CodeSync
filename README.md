@@ -1,51 +1,210 @@
-# code_sync
-`code_sync` auto-syncs your code changes in a local directory to a remote machine,
-so that you can edit your code in your local editor and instantly run those change on a remote machine.
+# CodeSync | Automated GitHub Code Synchronization & Version Control System
 
-Under the hood, `code_sync` is running an `rsync` command whenever `watchdog` notices changes to the code.
+CodeSync is a native Python desktop application that automates local workspace synchronization with remote GitHub repositories. It combines local Git version control and the GitHub API into a single dashboard, so you don't run `git add`, `git commit`, `git push` by hand every time.
+
+## Table of Contents
+
+- [Features](#features)
+- [Technical Architecture](#technical-architecture)
+- [Technologies Used](#technologies-used)
+- [Installation](#installation)
+- [Environment Setup](#environment-setup)
+- [Running the Application](#running-the-application)
+- [Complete Usage Workflow](#complete-usage-workflow)
+- [Project Structure](#project-structure)
+- [Safety Rules](#safety-rules)
+- [Known Limitations](#known-limitations)
+
+---
+
+## Features
+
+- **Project Workspace Integration**: Monitor any local project folder for changes.
+- **Git State Discovery**: Automatically scans workspaces for Modified (`M`), Staged/Added (`A`), Deleted (`D`), and Untracked (`??`) files.
+- **Auto-generated Commit Messages**: Uses a rule-based classification algorithm (not AI/ML) to analyze modified files and suggest a commit message.
+- **Interactive Repository Connection**: Connect an existing GitHub repository, or create a brand-new one on GitHub with a default `main` branch.
+- **MongoDB Synchronization History**: Archives every sync operation — files changed count, commit message, timestamp, and any error trace.
+- **Background Scheduler Daemon**: Automates syncing on an interval (15 min, 30 min, 1 hour, 6 hours, daily) using a non-blocking background thread.
+- **Secure Token Authentication**: Supports GitHub Personal Access Token auth, with the token masked everywhere it could appear — logs and GUI input.
+- **Non-Freezing UI**: Disk I/O, network calls, and Git operations all run on background worker threads, so the GUI never locks up mid-sync.
+
+---
+
+## Technical Architecture
+
+```text
+               +-------------------------------------------------+
+               |                   CodeSync GUI                  |
+               |  (Dashboard, Repositories, History, Scheduler)   |
+               +-------------------------------------------------+
+                                        |
+                                        v
+               +-------------------------------------------------+
+               |                   Sync Manager                  |
+               +-------------------------------------------------+
+                     /                  |                  \
+                    /                   |                   \
+                   v                    v                    v
+       +-----------------+     +-----------------+     +-----------------+
+       |   Git Manager   |     |  GitHub Manager  |     | Database Manager|
+       |  (GitPython CLI)|     |    (PyGithub)    |     |    (PyMongo)    |
+       +-----------------+     +-----------------+     +-----------------+
+                |                       |                       |
+                v                       v                       v
+       [ Local Git Repo ]      [ GitHub Cloud API ]    [ MongoDB — local or Atlas ]
+```
+
+Every database call in the app goes through `DatabaseManager` — no other module runs a raw query. That single choke point is what makes swapping the storage backend (this project moved from SQLite to MongoDB) a contained, low-risk change.
+
+---
+
+## Technologies Used
+
+| Library | Role |
+|---|---|
+| **Python 3.11+** | Base runtime |
+| **CustomTkinter** | Desktop GUI framework |
+| **GitPython** | Local Git operations (detect, stage, commit, branch) |
+| **PyGithub** | GitHub REST API v3 client — auth and repo management |
+| **PyMongo** | MongoDB driver |
+| **MongoDB** | Stores tracked repositories, sync history, and settings |
+| **python-dotenv** | Loads credentials/config from `.env` |
+| **schedule** | Powers the background interval scheduler |
+| **Pillow** | GUI image asset handling |
+
+---
 
 ## Installation
-`pip install code_sync`
 
-After installing this package, the `code_sync` tool will be available from the command line.
+### 1. Prerequisites
 
+**Python** — Install 3.11 or newer from [python.org](https://www.python.org/downloads/). On Windows, check **"Add Python to PATH"** during install.
 
-## Usage
+**Git** — CodeSync shells out to the Git CLI, so it must be installed separately:
+- Windows: [git-scm.com](https://git-scm.com/download/win)
+- Mac: `brew install git`
+- Linux: `sudo apt install git`
 
-#### Register a project
-    code_sync --register <project>
-This will prompt you to enter the local directory to sync,
-the remote machines to sync to,
-and the destination path on the remote to sync the files to.
+**MongoDB** — pick one:
+- **Local install**: [MongoDB Community Server](https://www.mongodb.com/try/download/community). Make sure `mongod` is running before you launch CodeSync.
+- **MongoDB Atlas** (no local install): create a free cluster at [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas) and copy its connection string for the next step.
 
-Once you register a project with `code_sync`, it will remember that configuration.
+### 2. Project Setup
 
-#### code_sync a registered project
-    code_sync <project>
-This command will use the configuration you set for the project when you registered it.
+```bash
+pip install -r requirements.txt
+```
 
-#### List all projects registered to code_sync
-    code_sync --list
+---
 
-#### Run code_sync with specific parameters
-    code_sync --local_dir <mylocaldir/> --remote_dir <myremotedir/> --target <ssh_remote> --port 2222\n
+## Environment Setup
 
-#### Edit or delete a registered project
-    code_sync --edit <project>
-    code_sync --delete <project>
+1. Copy the template:
+   ```bash
+   cp .env.example .env
+   ```
+2. Fill in `.env`:
+   ```text
+   GITHUB_TOKEN=ghp_yourpersonaltokenhere
+   GITHUB_USERNAME=yourusername
+   DEFAULT_BRANCH=main
+   DEFAULT_COMMIT_MESSAGE=Update project files via CodeSync
 
-### Notes
-**Starting**
-* In order to run `code_sync`, you must have an ssh connection open in another window.
-Once you've entered your password there, `code_sync` uses that connection.
-* The destination dir must exist already, but need not be empty.
+   MONGO_URI=mongodb://localhost:27017
+   MONGO_DB_NAME=codesync
+   ```
+   Use `mongodb://localhost:27017` for a local install, or your Atlas connection string (starts with `mongodb+srv://`) if using Atlas.
 
-**Stopping**
-* You can safely quit `code_sync` with control-c.
+### Creating a GitHub Personal Access Token (PAT)
 
-**About `code_sync` + `git`**
-* `code_sync` does not sync files that are excluded by `.gitignore`, if present in the local directory.
-It also does not sync `.git` and `.ipynb` files.
-* The destination directory should not be treated as an active git repo.
-* **Do not run git commands from the destination terminal** on the destination directory.
-The destination dir will have its contents synced to exactly match the local dir, including when you checkout a different branch on local.
+1. GitHub profile → **Settings** → **Developer Settings** → **Personal Access Tokens** → **Tokens (classic)**.
+2. **Generate new token (classic)**.
+3. Set an expiration, name it (e.g. `CodeSync App`), and grant the **`repo`** scope (full control of private and public repositories).
+4. Generate, copy it immediately, and paste it into either the app's **Settings** panel or your `.env` file. GitHub won't show it to you again.
+
+---
+
+## Running the Application
+
+```bash
+python main.py
+```
+
+---
+
+## Complete Usage Workflow
+
+1. **Authenticate**: Settings → paste GitHub username + PAT → **Test GitHub Connection** → **Save Settings**.
+2. **Track a project**: Repositories → **Add Repository** → pick a local folder → **Connect Existing Repo** (paste its GitHub URL) or **Create New Repo** → **Add Project**.
+3. **Sync manually**: Dashboard → pick the project from **Active Project** → review the changed-files table → **Generate Message** (or type your own) → **Sync to GitHub**.
+4. **Automate it**: Scheduler → toggle **Automatic Sync** on → pick an interval and a repository → **Save Scheduler Configuration**.
+5. **Audit**: History tab shows every past sync — double-click a row for full debug detail on that run.
+
+---
+
+## Project Structure
+
+```text
+CodeSync/
+│
+├── main.py                     # App bootstrap loader
+├── config.py                   # Configuration parser and file system paths resolver
+├── requirements.txt            # Python environment packages
+├── README.md                   # This file
+├── .env.example                # Configuration template
+├── .gitignore                  # Git tracking exclusion list
+│
+├── core/
+│   ├── git_manager.py          # Wrapper for GitPython operations
+│   ├── github_manager.py       # Wrapper for PyGithub cloud operations
+│   ├── sync_manager.py         # End-to-end sync coordinator
+│   └── scheduler.py            # Non-blocking scheduler thread engine
+│
+├── database/
+│   └── database_manager.py     # MongoDB collections and query methods
+│
+├── gui/
+│   ├── app.py                  # Main window shell and sidebar navigation
+│   ├── dashboard.py            # Sync workspace panel
+│   ├── repositories.py         # Project configurations panel
+│   ├── settings.py             # User preferences panel
+│   ├── history.py              # Sync history log panel
+│   ├── scheduler.py            # Automation panel
+│   └── about.py                # App metadata panel
+│
+├── utils/
+│   ├── logger.py                # Logger with token masking
+│   ├── validators.py            # Form input verification helpers
+│   └── helpers.py                # Rule-based commit message generator
+│
+├── tests/
+│   ├── test_git.py
+│   ├── test_github.py
+│   ├── test_database.py
+│   └── test_utils.py
+│
+└── logs/
+    └── automation.log          # Application execution log (Git-ignored)
+```
+
+Data lives in MongoDB (local `mongod` instance or Atlas) — there's no local `.db` file.
+
+---
+
+## Safety Rules
+
+- CodeSync **never** force-pushes (`git push --force`) by default — remote history is never silently overwritten by a push.
+- Project folder deletion is never automated.
+- `.env` (including your Mongo connection string and GitHub token) is Git-ignored by default.
+- Personal Access Tokens are masked in every log line and input box.
+
+---
+
+## Known Limitations
+
+Being upfront about scope here rather than overselling it:
+
+- **No multi-device conflict resolution.** If the same file changes differently on GitHub and locally, the sync uses a merge strategy that favors the local version by default. This is fine for a single-user, single-device workflow — it is not safe for two people (or two machines) editing the same repo through CodeSync at the same time.
+- **Commit messages are rule-based, not AI-generated.** The generator pattern-matches on file extensions and change types (added/modified/deleted). It's fast and predictable, but won't produce a message that understands the actual logic of your change.
+- **Single-user by design.** There's no auth/user model — anyone with access to your machine and your `.env` has full access to your tracked repos.
+- **Desktop-only.** This runs locally; it is not a hosted or multi-client service.
