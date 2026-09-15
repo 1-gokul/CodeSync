@@ -13,7 +13,6 @@ CodeSync is a native Python desktop application that automates local workspace s
 - [Complete Usage Workflow](#complete-usage-workflow)
 - [Project Structure](#project-structure)
 - [Safety Rules](#safety-rules)
-- [Known Limitations](#known-limitations)
 
 ---
 
@@ -197,14 +196,3 @@ Data lives in MongoDB (local `mongod` instance or Atlas) — there's no local `.
 - Project folder deletion is never automated.
 - `.env` (including your Mongo connection string and GitHub token) is Git-ignored by default.
 - Personal Access Tokens are masked in every log line and input box.
-
----
-
-## Known Limitations
-
-Being upfront about scope here rather than overselling it:
-
-- **No multi-device conflict resolution.** If the same file changes differently on GitHub and locally, the sync uses a merge strategy that favors the local version by default. This is fine for a single-user, single-device workflow — it is not safe for two people (or two machines) editing the same repo through CodeSync at the same time.
-- **Commit messages are rule-based, not AI-generated.** The generator pattern-matches on file extensions and change types (added/modified/deleted). It's fast and predictable, but won't produce a message that understands the actual logic of your change.
-- **Single-user by design.** There's no auth/user model — anyone with access to your machine and your `.env` has full access to your tracked repos.
-- **Desktop-only.** This runs locally; it is not a hosted or multi-client service.
